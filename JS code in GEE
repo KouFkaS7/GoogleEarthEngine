@@ -1,0 +1,67 @@
+
+Map.centerObject(geometry, 10);
+Map.addLayer(geometry, {color: 'red'}, 'Study Area');
+
+// Ημερομηνίες
+var preFireStart = '2024-06-01';
+var preFireEnd = '2024-06-20';
+var postFireStart = '2024-06-25';
+var postFireEnd = '2024-07-15';
+
+// Εικόνες Sentinel-2
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(geometry)
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10));
+
+var preFire = s2.filterDate(preFireStart, preFireEnd).median().clip(geometry);
+var postFire = s2.filterDate(postFireStart, postFireEnd).median().clip(geometry);
+
+// Υπολογισμός dNBR
+function calcNBR(img) {
+  return img.normalizedDifference(['B8', 'B12']).rename('NBR');
+}
+
+var nbrPre = calcNBR(preFire);
+var nbrPost = calcNBR(postFire);
+var dnbr = nbrPre.subtract(nbrPost).rename('dNBR');
+
+// *** Κατηγοριοποίηση με .where() ***
+var classified = ee.Image(0)
+  .where(dnbr.gt(0.1), 1)
+  .where(dnbr.gt(0.27), 2)
+  .where(dnbr.gt(0.44), 3)
+  .where(dnbr.gt(0.66), 4)
+  .updateMask(dnbr.mask());  // διατηρεί μόνο έγκυρες τιμές
+
+// Χρώματα & ετικέτες
+var palette = ['#a1d99b', '#ffffb2', '#fecc5c', '#fd8d3c', '#bd0026'];
+var names = [
+  'Unburned / Low Change',
+  'Low Burn Severity',
+  'Moderate-Low Burn',
+  'Moderate-High Burn',
+  'High Burn Severity'
+];
+
+
+// Εμφάνιση στον χάρτη
+Map.addLayer(classified, {
+  min: 0,
+  max: 4,
+  palette: palette
+}, 'Burn Severity Classification');
+
+// Προσθήκη Legend
+var legend = ui.Panel({style: {position: 'bottom-left'}});
+legend.add(ui.Label({
+  value: 'Burn Severity (dNBR)',
+  style: {fontWeight: 'bold', fontSize: '14px', margin: '4px'}
+}));
+
+for (var i = 0; i < palette.length; i++) {
+  legend.add(ui.Panel([
+    ui.Label({style: {backgroundColor: palette[i], padding: '8px', margin: '2px'}}),
+    ui.Label({value: names[i], style: {margin: '4px'}})
+  ], ui.Panel.Layout.Flow('horizontal')));
+}
+Map.add(legend);
